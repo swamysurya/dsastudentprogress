@@ -27,19 +27,24 @@ export const App: React.FC = () => {
     }
   }, [currentUser]);
 
-  // Load current student's progress
-  const loadStudentProgress = useCallback(async (userId: string) => {
+  // Load current user's progress (student or instructor)
+  const loadUserProgress = useCallback(async (user: User) => {
     setLoadingProgress(true);
-    const data = await supabaseService.getStudentProgress(userId);
-    setProgressMap(data);
+    if (user.role === 'teacher') {
+      const data = await supabaseService.getInstructorProgress();
+      setProgressMap(data);
+    } else {
+      const data = await supabaseService.getStudentProgress(user.id);
+      setProgressMap(data);
+    }
     setLoadingProgress(false);
   }, []);
 
   useEffect(() => {
     if (currentUser) {
-      loadStudentProgress(currentUser.id);
+      loadUserProgress(currentUser);
     }
-  }, [currentUser, loadStudentProgress]);
+  }, [currentUser, loadUserProgress]);
 
   // Handle question progress update
   const handleProgressUpdate = async (questionId: string, status: ProgressStatus, notes?: string) => {
@@ -55,7 +60,11 @@ export const App: React.FC = () => {
       }
     }));
 
-    await supabaseService.updateQuestionProgress(currentUser.id, questionId, status, notes);
+    if (currentUser.role === 'teacher') {
+      await supabaseService.saveInstructorProgress(questionId, status, notes);
+    } else {
+      await supabaseService.updateQuestionProgress(currentUser.id, questionId, status, notes);
+    }
   };
 
   // Quick student stats for Navbar badge
@@ -88,7 +97,7 @@ export const App: React.FC = () => {
   const handleConfigSaved = () => {
     setIsSupabaseConfigured(supabaseService.getConfiguration().isConfigured);
     if (currentUser) {
-      loadStudentProgress(currentUser.id);
+      loadUserProgress(currentUser);
     }
   };
 

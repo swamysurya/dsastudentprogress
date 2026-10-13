@@ -3,7 +3,7 @@ import { StudentStats, DoubtItem, User, ProgressStatus } from '../types';
 import { MODULES, RAW_QUESTIONS } from '../data/dsaQuestionsData';
 import { supabaseService } from '../services/supabase';
 import { StudentDetailModal } from './StudentDetailModal';
-import { Download, Check, Search, Eye, Copy, ExternalLink, CheckCircle2, ChevronDown, ChevronUp, HelpCircle } from 'lucide-react';
+import { Download, Check, Search, Eye, Copy, ExternalLink, CheckCircle2, ChevronDown, ChevronUp, HelpCircle, RotateCw } from 'lucide-react';
 
 interface TeacherAnalyticsProps {
   currentUser: User;
@@ -45,15 +45,40 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({
   const [generatedCredentialsList, setGeneratedCredentialsList] = useState<Array<{ name: string; email: string; pass: string }>>([]);
   const [copiedCredentials, setCopiedCredentials] = useState<boolean>(false);
 
+  const [internalInstructorProgress, setInternalInstructorProgress] = useState<Record<string, { status: ProgressStatus; notes?: string; updatedAt: string }>>(instructorProgress || {});
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (instructorProgress && Object.keys(instructorProgress).length > 0) {
+      setInternalInstructorProgress(prev => ({ ...prev, ...instructorProgress }));
+    }
+  }, [instructorProgress]);
+
+  const effectiveInstructorProgress = useMemo(() => {
+    return {
+      ...(instructorProgress || {}),
+      ...internalInstructorProgress
+    };
+  }, [instructorProgress, internalInstructorProgress]);
+
   const refreshData = async () => {
-    const [stats, doubts, qStats] = await Promise.all([
-      supabaseService.getAllStudentsStats(),
-      supabaseService.getAllDoubts(),
-      supabaseService.getQuestionsCompletionStats()
-    ]);
-    setStudentsStats(stats);
-    setDoubtsList(doubts);
-    setQuestionsStats(qStats);
+    setIsRefreshing(true);
+    try {
+      const [stats, doubts, qStats, instProg] = await Promise.all([
+        supabaseService.getAllStudentsStats(),
+        supabaseService.getAllDoubts(),
+        supabaseService.getQuestionsCompletionStats(),
+        supabaseService.getInstructorProgress()
+      ]);
+      setStudentsStats(stats);
+      setDoubtsList(doubts);
+      setQuestionsStats(qStats);
+      if (instProg && Object.keys(instProg).length > 0) {
+        setInternalInstructorProgress(instProg);
+      }
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   useEffect(() => {
@@ -61,9 +86,9 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({
   }, []);
 
   const instructorCoveredCount = useMemo(() => {
-    if (!instructorProgress) return 0;
-    return Object.values(instructorProgress).filter(p => p.status === 'completed').length;
-  }, [instructorProgress]);
+    if (!effectiveInstructorProgress) return 0;
+    return Object.values(effectiveInstructorProgress).filter(p => p.status === 'completed').length;
+  }, [effectiveInstructorProgress]);
 
   // Aggregates
   const batchMetrics = useMemo(() => {
@@ -78,9 +103,9 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({
     return { totalStudents, avgCompletion, totalDoubts };
   }, [studentsStats, doubtsList]);
 
-  const handleToggleDoubtResolved = (doubtId: string) => {
-    supabaseService.toggleDoubtResolved(doubtId);
+  const handleToggleDoubtResolved = async (doubtId: string) => {
     setDoubtsList(prev => prev.map(d => d.id === doubtId ? { ...d, resolved: !d.resolved } : d));
+    await supabaseService.toggleDoubtResolved(doubtId);
   };
 
   const handleCreateStudent = (e: React.FormEvent) => {
@@ -232,7 +257,7 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({
         }
       }
 
-      const isInstructorDone = instructorProgress?.[q.id]?.status === 'completed';
+      const isInstructorDone = effectiveInstructorProgress?.[q.id]?.status === 'completed';
       const qStat = questionsStats[q.id];
       const studentsDone = qStat?.completedCount || 0;
       const doubtsCount = qStat?.doubtCount || 0;
@@ -245,7 +270,7 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({
 
       return true;
     });
-  }, [qModuleFilter, qDifficultyFilter, qSearch, qStatusFilter, instructorProgress, questionsStats]);
+  }, [qModuleFilter, qDifficultyFilter, qSearch, qStatusFilter, effectiveInstructorProgress, questionsStats]);
 
   return (
     <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -267,7 +292,17 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({
             </p>
           </div>
 
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+            <button 
+              onClick={refreshData} 
+              disabled={isRefreshing}
+              className="btn btn-secondary" 
+              style={{ fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+              title="Sync live analytics across all devices"
+            >
+              <RotateCw size={13} style={{ transform: isRefreshing ? 'rotate(180deg)' : 'none', transition: 'transform 0.4s ease' }} />
+              {isRefreshing ? 'Syncing...' : 'Sync Live Data'}
+            </button>
             <button onClick={handleExportCSV} className="btn btn-secondary" style={{ fontSize: '0.8rem' }}>
               <Download size={13} /> Export CSV
             </button>
@@ -508,7 +543,7 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({
                   </tr>
                 ) : (
                   filteredQuestions.map((q, idx) => {
-                    const isCovered = instructorProgress?.[q.id]?.status === 'completed';
+                    const isCovered = effectiveInstructorProgress?.[q.id]?.status === 'completed';
                     const stat = questionsStats[q.id] || { completedCount: 0, doubtCount: 0, completedStudents: [], doubtStudents: [] };
                     const totalStudents = Math.max(studentsStats.length, 1);
                     const completionPct = Math.round((stat.completedCount / totalStudents) * 100);
@@ -579,9 +614,19 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({
                           <td style={{ padding: '0.75rem 0.9rem' }}>
                             <button
                               type="button"
-                              onClick={() => {
+                              onClick={async () => {
+                                const nextStatus = isCovered ? 'not_completed' : 'completed';
+                                setInternalInstructorProgress(prev => ({
+                                  ...prev,
+                                  [q.id]: {
+                                    status: nextStatus,
+                                    updatedAt: new Date().toISOString()
+                                  }
+                                }));
                                 if (onInstructorProgressUpdate) {
-                                  onInstructorProgressUpdate(q.id, isCovered ? 'not_completed' : 'completed');
+                                  onInstructorProgressUpdate(q.id, nextStatus);
+                                } else {
+                                  await supabaseService.saveInstructorProgress(q.id, nextStatus);
                                 }
                               }}
                               style={{
@@ -732,7 +777,7 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({
           {MODULES.map(m => {
             const qs = RAW_QUESTIONS.filter(q => q.moduleId === m.id);
             const doubts = doubtsList.filter(d => d.moduleTitle === m.title && !d.resolved);
-            const coveredInModule = qs.filter(q => instructorProgress?.[q.id]?.status === 'completed').length;
+            const coveredInModule = qs.filter(q => effectiveInstructorProgress?.[q.id]?.status === 'completed').length;
 
             return (
               <div

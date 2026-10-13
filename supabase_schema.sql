@@ -39,11 +39,17 @@ CREATE TABLE IF NOT EXISTS public.questions (
 CREATE TABLE IF NOT EXISTS public.student_progress (
   id BIGSERIAL PRIMARY KEY,
   student_id TEXT NOT NULL,
-  question_id TEXT REFERENCES public.questions(id) ON DELETE CASCADE,
+  question_id TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'not_completed' CHECK (status IN ('not_completed', 'completed', 'doubt')),
   notes TEXT,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
   UNIQUE(student_id, question_id)
+);
+
+-- Resolved Doubts Table
+CREATE TABLE IF NOT EXISTS public.resolved_doubts (
+  id TEXT PRIMARY KEY,
+  resolved_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 -- 5. Row Level Security (RLS) Setup
@@ -51,37 +57,14 @@ ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.modules ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.questions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.student_progress ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.resolved_doubts ENABLE ROW LEVEL SECURITY;
 
--- Profiles Policies
-CREATE POLICY "Public profiles are readable by authenticated users"
-  ON public.profiles FOR SELECT TO authenticated
-  USING (true);
-
-CREATE POLICY "Users can update their own profile"
-  ON public.profiles FOR UPDATE TO authenticated
-  USING (auth.uid() = id);
-
--- Modules & Questions Policies (Readable by everyone)
-CREATE POLICY "Modules readable by authenticated users"
-  ON public.modules FOR SELECT TO authenticated
-  USING (true);
-
-CREATE POLICY "Questions readable by authenticated users"
-  ON public.questions FOR SELECT TO authenticated
-  USING (true);
-
--- Student Progress Policies
-CREATE POLICY "Students can view and update their own progress"
-  ON public.student_progress FOR ALL TO authenticated
-  USING (student_id = auth.uid()::text OR EXISTS (
-    SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'teacher'
-  ));
-
-CREATE POLICY "Teachers can view all student progress"
-  ON public.student_progress FOR SELECT TO authenticated
-  USING (EXISTS (
-    SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'teacher'
-  ));
+-- Allow read and write access for both authenticated and anon API users
+CREATE POLICY "Allow all access to profiles" ON public.profiles FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all access to modules" ON public.modules FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all access to questions" ON public.questions FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all access to student_progress" ON public.student_progress FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all access to resolved_doubts" ON public.resolved_doubts FOR ALL TO public USING (true) WITH CHECK (true);
 
 -- 6. Insert Default Modules
 INSERT INTO public.modules (id, title, description, order_index) VALUES

@@ -288,6 +288,20 @@ class SupabaseService {
       this.persistMockProgress();
     }
 
+    // Sync to Supabase profiles if configured
+    if (this.isConfigured && this.client) {
+      this.client
+        .from('profiles')
+        .upsert({
+          id: newUser.id,
+          email: newUser.email,
+          full_name: newUser.name,
+          role: 'student',
+          batch: newUser.batch
+        })
+        .catch(() => {});
+    }
+
     return newUser;
   }
 
@@ -349,7 +363,7 @@ class SupabaseService {
     // 2. If Supabase configured, upsert into DB
     if (this.isConfigured && this.client) {
       try {
-        await this.client
+        const { error } = await this.client
           .from('student_progress')
           .upsert({
             student_id: studentId,
@@ -358,8 +372,114 @@ class SupabaseService {
             notes: notes || null,
             updated_at: updatedAt
           }, { onConflict: 'student_id, question_id' });
+
+        if (error) {
+          console.warn('Could not sync to Supabase student_progress:', error.message);
+        }
       } catch (err) {
         console.warn('Could not sync to Supabase:', err);
+      }
+    }
+
+    return true;
+  }
+
+  // Instructor Progress: Dedicated persistent methods syncing across deployment & local
+  public async getInstructorProgress(): Promise<Record<string, { status: ProgressStatus; notes?: string; updatedAt: string }>> {
+    const INSTRUCTOR_KEY = 'instructor';
+    
+    // 1. If Supabase configured, fetch instructor progress from DB
+    if (this.isConfigured && this.client) {
+      try {
+        const { data, error } = await this.client
+          .from('student_progress')
+          .select('question_id, status, notes, updated_at')
+          .in('student_id', [INSTRUCTOR_KEY, 'user-teacher-1']);
+
+        if (!error && data && data.length > 0) {
+          const map: Record<string, { status: ProgressStatus; notes?: string; updatedAt: string }> = {};
+          data.forEach(item => {
+            map[item.question_id] = {
+              status: item.status as ProgressStatus,
+              notes: item.notes,
+              updatedAt: item.updated_at
+            };
+          });
+          // Cache in localStorage
+          localStorage.setItem('dsa_tracker_instructor_progress', JSON.stringify(map));
+          return map;
+        }
+      } catch (err) {
+        console.warn('Error fetching instructor progress from Supabase:', err);
+      }
+    }
+
+    // 2. Fallback to localStorage
+    const stored = localStorage.getItem('dsa_tracker_instructor_progress');
+    if (stored) {
+      try {
+        return JSON.parse(stored);
+      } catch {}
+    }
+
+    if (this.mockProgress[INSTRUCTOR_KEY] && Object.keys(this.mockProgress[INSTRUCTOR_KEY]).length > 0) {
+      return this.mockProgress[INSTRUCTOR_KEY];
+    }
+    if (this.mockProgress['user-teacher-1'] && Object.keys(this.mockProgress['user-teacher-1']).length > 0) {
+      return this.mockProgress['user-teacher-1'];
+    }
+
+    return {};
+  }
+
+  public async saveInstructorProgress(
+    questionId: string,
+    status: ProgressStatus,
+    notes?: string
+  ): Promise<boolean> {
+    const INSTRUCTOR_KEY = 'instructor';
+    const updatedAt = new Date().toISOString();
+
+    // 1. Update in local storage cache
+    let currentMap: Record<string, { status: ProgressStatus; notes?: string; updatedAt: string }> = {};
+    const stored = localStorage.getItem('dsa_tracker_instructor_progress');
+    if (stored) {
+      try {
+        currentMap = JSON.parse(stored);
+      } catch {}
+    }
+    currentMap[questionId] = {
+      status,
+      notes: notes !== undefined ? notes : currentMap[questionId]?.notes,
+      updatedAt
+    };
+    localStorage.setItem('dsa_tracker_instructor_progress', JSON.stringify(currentMap));
+
+    // Also update mockProgress for both 'instructor' and 'user-teacher-1'
+    if (!this.mockProgress[INSTRUCTOR_KEY]) this.mockProgress[INSTRUCTOR_KEY] = {};
+    this.mockProgress[INSTRUCTOR_KEY][questionId] = currentMap[questionId];
+    if (!this.mockProgress['user-teacher-1']) this.mockProgress['user-teacher-1'] = {};
+    this.mockProgress['user-teacher-1'][questionId] = currentMap[questionId];
+    this.persistMockProgress();
+
+    // 2. If Supabase configured, save to Supabase student_progress table
+    if (this.isConfigured && this.client) {
+      try {
+        const { error } = await this.client
+          .from('student_progress')
+          .upsert({
+            student_id: INSTRUCTOR_KEY,
+            question_id: questionId,
+            status: status,
+            notes: notes || null,
+            updated_at: updatedAt
+          }, { onConflict: 'student_id, question_id' });
+
+        if (error) {
+          console.warn('Could not sync instructor progress to Supabase:', error.message);
+        }
+      } catch (err) {
+        console.warn('Could not sync instructor progress to Supabase:', err);
       }
     }
 
@@ -597,14 +717,18 @@ class SupabaseService {
 
         if (progressRows) {
           progressRows.forEach(row => {
-            if (profileMap.has(row.student_id) && result[row.question_id]) {
-              const studentName = profileMap.get(row.student_id)!;
+            if (row.student_id !== 'instructor' && row.student_id !== 'user-teacher-1' && result[row.question_id]) {
+              const studentName = profileMap.get(row.student_id) || `Student (${row.student_id.substring(0, 8)})`;
               if (row.status === 'completed') {
                 result[row.question_id].completedCount++;
-                result[row.question_id].completedStudents.push(studentName);
+                if (!result[row.question_id].completedStudents.includes(studentName)) {
+                  result[row.question_id].completedStudents.push(studentName);
+                }
               } else if (row.status === 'doubt') {
                 result[row.question_id].doubtCount++;
-                result[row.question_id].doubtStudents.push(studentName);
+                if (!result[row.question_id].doubtStudents.includes(studentName)) {
+                  result[row.question_id].doubtStudents.push(studentName);
+                }
               }
             }
           });
@@ -645,16 +769,28 @@ class SupabaseService {
     }
   }
 
-  public toggleDoubtResolved(doubtId: string): boolean {
+  public async toggleDoubtResolved(doubtId: string): Promise<boolean> {
     const current = this.getResolvedDoubtIds();
     let updated: string[];
+    const isNowResolved = !current.includes(doubtId);
     if (current.includes(doubtId)) {
       updated = current.filter(id => id !== doubtId);
     } else {
       updated = [...current, doubtId];
     }
     localStorage.setItem(STORAGE_KEY_RESOLVED_DOUBTS, JSON.stringify(updated));
-    return updated.includes(doubtId);
+
+    if (this.isConfigured && this.client) {
+      try {
+        if (isNowResolved) {
+          await this.client.from('resolved_doubts').upsert({ id: doubtId });
+        } else {
+          await this.client.from('resolved_doubts').delete().eq('id', doubtId);
+        }
+      } catch {}
+    }
+
+    return isNowResolved;
   }
 }
 
