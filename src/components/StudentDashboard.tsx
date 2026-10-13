@@ -132,10 +132,14 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
           <div>
             <h1 style={{ fontSize: '1.2rem', fontWeight: 600, color: '#fff' }}>
-              DSA Coding Practice
+              {currentUser.role === 'teacher' ? 'DSA Curriculum Practice Tracker' : 'DSA Coding Practice'}
             </h1>
             <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-              Student: <span style={{ color: '#fff' }}>{currentUser.name}</span> ({currentUser.email})
+              {currentUser.role === 'teacher' ? (
+                <>Instructor: <span style={{ color: '#fff' }}>{currentUser.name}</span> (Curriculum Lead)</>
+              ) : (
+                <>Student: <span style={{ color: '#fff' }}>{currentUser.name}</span> ({currentUser.email})</>
+              )}
             </p>
           </div>
 

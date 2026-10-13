@@ -66,7 +66,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   color: activeView === 'student' ? '#fff' : 'var(--text-secondary)'
                 }}
               >
-                Questions
+                Practice Tracker
               </button>
               <button
                 onClick={() => onViewChange('teacher')}
@@ -81,14 +81,14 @@ export const Navbar: React.FC<NavbarProps> = ({
                   color: activeView === 'teacher' ? '#fff' : 'var(--text-secondary)'
                 }}
               >
-                Analytics
+                Instructor Analytics
               </button>
             </div>
           )}
         </div>
 
-        {/* Quick summary stats if in student view */}
-        {activeView === 'student' && studentStats && (
+        {/* Quick summary stats */}
+        {studentStats && (
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -97,11 +97,16 @@ export const Navbar: React.FC<NavbarProps> = ({
             color: 'var(--text-secondary)'
           }}>
             <span>
-              Done: <strong style={{ color: 'var(--color-completed)' }}>{studentStats.completed}</strong>
+              {user.role === 'teacher' ? 'Instructor Done: ' : 'Done: '}
+              <strong style={{ color: user.role === 'teacher' ? '#38bdf8' : 'var(--color-completed)' }}>
+                {studentStats.completed}
+              </strong>
             </span>
-            <span>
-              Doubts: <strong style={{ color: 'var(--color-doubt)' }}>{studentStats.doubt}</strong>
-            </span>
+            {user.role !== 'teacher' && (
+              <span>
+                Doubts: <strong style={{ color: 'var(--color-doubt)' }}>{studentStats.doubt}</strong>
+              </span>
+            )}
             <span>
               Total: <strong style={{ color: 'var(--text-primary)' }}>{studentStats.total}</strong>
             </span>

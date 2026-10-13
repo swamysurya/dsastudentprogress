@@ -569,6 +569,72 @@ class SupabaseService {
     return doubts.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   }
 
+  // Question-by-question completion analytics across all students
+  public async getQuestionsCompletionStats(): Promise<Record<string, { completedCount: number; doubtCount: number; completedStudents: string[]; doubtStudents: string[] }>> {
+    const result: Record<string, { completedCount: number; doubtCount: number; completedStudents: string[]; doubtStudents: string[] }> = {};
+    
+    RAW_QUESTIONS.forEach(q => {
+      result[q.id] = {
+        completedCount: 0,
+        doubtCount: 0,
+        completedStudents: [],
+        doubtStudents: []
+      };
+    });
+
+    if (this.isConfigured && this.client) {
+      try {
+        const { data: progressRows } = await this.client
+          .from('student_progress')
+          .select('student_id, question_id, status');
+
+        const { data: profiles } = await this.client
+          .from('profiles')
+          .select('id, full_name, email, role')
+          .eq('role', 'student');
+
+        const profileMap = new Map((profiles || []).map(p => [p.id, p.full_name || p.email.split('@')[0]]));
+
+        if (progressRows) {
+          progressRows.forEach(row => {
+            if (profileMap.has(row.student_id) && result[row.question_id]) {
+              const studentName = profileMap.get(row.student_id)!;
+              if (row.status === 'completed') {
+                result[row.question_id].completedCount++;
+                result[row.question_id].completedStudents.push(studentName);
+              } else if (row.status === 'doubt') {
+                result[row.question_id].doubtCount++;
+                result[row.question_id].doubtStudents.push(studentName);
+              }
+            }
+          });
+        }
+        return result;
+      } catch (err) {
+        console.warn('Error fetching question stats from Supabase:', err);
+      }
+    }
+
+    // Local fallback
+    const allStudents = this.getAllRegisteredUsers().filter(u => u.role === 'student');
+    for (const s of allStudents) {
+      const p = await this.getStudentProgress(s.id);
+      Object.entries(p).forEach(([qId, item]) => {
+        if (result[qId]) {
+          if (item.status === 'completed') {
+            result[qId].completedCount++;
+            result[qId].completedStudents.push(s.name);
+          } else if (item.status === 'doubt') {
+            result[qId].doubtCount++;
+            result[qId].doubtStudents.push(s.name);
+          }
+        }
+      });
+    }
+
+    return result;
+  }
+
   public getResolvedDoubtIds(): string[] {
     const raw = localStorage.getItem(STORAGE_KEY_RESOLVED_DOUBTS);
     if (!raw) return [];

@@ -1,22 +1,36 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { StudentStats, DoubtItem, User } from '../types';
+import { StudentStats, DoubtItem, User, ProgressStatus } from '../types';
 import { MODULES, RAW_QUESTIONS } from '../data/dsaQuestionsData';
 import { supabaseService } from '../services/supabase';
 import { StudentDetailModal } from './StudentDetailModal';
-import { Download, Check, Search, Eye, Copy } from 'lucide-react';
+import { Download, Check, Search, Eye, Copy, ExternalLink, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface TeacherAnalyticsProps {
   currentUser: User;
+  instructorProgress?: Record<string, { status: ProgressStatus; notes?: string; updatedAt: string }>;
+  onInstructorProgressUpdate?: (questionId: string, status: ProgressStatus, notes?: string) => void;
 }
 
-export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({ currentUser: _currentUser }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'doubts' | 'students' | 'add-student'>('overview');
+export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({ 
+  currentUser: _currentUser,
+  instructorProgress,
+  onInstructorProgressUpdate
+}) => {
+  const [activeTab, setActiveTab] = useState<'overview' | 'questions' | 'doubts' | 'students' | 'add-student'>('questions');
   const [studentsStats, setStudentsStats] = useState<StudentStats[]>([]);
   const [doubtsList, setDoubtsList] = useState<DoubtItem[]>([]);
+  const [questionsStats, setQuestionsStats] = useState<Record<string, { completedCount: number; doubtCount: number; completedStudents: string[]; doubtStudents: string[] }>>({});
   const [selectedStudentForModal, setSelectedStudentForModal] = useState<StudentStats | null>(null);
   const [searchStudent, setSearchStudent] = useState<string>('');
   const [doubtModuleFilter, setDoubtModuleFilter] = useState<string>('all');
   const [hideResolvedDoubts, setHideResolvedDoubts] = useState<boolean>(false);
+
+  // Question Tracker state
+  const [qSearch, setQSearch] = useState<string>('');
+  const [qModuleFilter, setQModuleFilter] = useState<string>('all');
+  const [qDifficultyFilter, setQDifficultyFilter] = useState<string>('all');
+  const [qStatusFilter, setQStatusFilter] = useState<'all' | 'instructor_done' | 'instructor_pending' | 'has_students_done' | 'zero_done' | 'has_doubts'>('all');
+  const [expandedQuestionId, setExpandedQuestionId] = useState<string | null>(null);
 
   // New Student Single state
   const [newStudentName, setNewStudentName] = useState<string>('');
@@ -32,17 +46,24 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({ currentUser:
   const [copiedCredentials, setCopiedCredentials] = useState<boolean>(false);
 
   const refreshData = async () => {
-    const [stats, doubts] = await Promise.all([
+    const [stats, doubts, qStats] = await Promise.all([
       supabaseService.getAllStudentsStats(),
-      supabaseService.getAllDoubts()
+      supabaseService.getAllDoubts(),
+      supabaseService.getQuestionsCompletionStats()
     ]);
     setStudentsStats(stats);
     setDoubtsList(doubts);
+    setQuestionsStats(qStats);
   };
 
   useEffect(() => {
     refreshData();
   }, []);
+
+  const instructorCoveredCount = useMemo(() => {
+    if (!instructorProgress) return 0;
+    return Object.values(instructorProgress).filter(p => p.status === 'completed').length;
+  }, [instructorProgress]);
 
   // Aggregates
   const batchMetrics = useMemo(() => {
@@ -199,6 +220,33 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({ currentUser:
     return true;
   });
 
+  const filteredQuestions = useMemo(() => {
+    return RAW_QUESTIONS.filter(q => {
+      if (qModuleFilter !== 'all' && q.moduleId !== qModuleFilter) return false;
+      if (qDifficultyFilter !== 'all' && q.difficulty !== qDifficultyFilter) return false;
+      
+      if (qSearch.trim()) {
+        const query = qSearch.toLowerCase();
+        if (!q.title.toLowerCase().includes(query) && !q.topic.toLowerCase().includes(query)) {
+          return false;
+        }
+      }
+
+      const isInstructorDone = instructorProgress?.[q.id]?.status === 'completed';
+      const qStat = questionsStats[q.id];
+      const studentsDone = qStat?.completedCount || 0;
+      const doubtsCount = qStat?.doubtCount || 0;
+
+      if (qStatusFilter === 'instructor_done' && !isInstructorDone) return false;
+      if (qStatusFilter === 'instructor_pending' && isInstructorDone) return false;
+      if (qStatusFilter === 'has_students_done' && studentsDone === 0) return false;
+      if (qStatusFilter === 'zero_done' && studentsDone > 0) return false;
+      if (qStatusFilter === 'has_doubts' && doubtsCount === 0) return false;
+
+      return true;
+    });
+  }, [qModuleFilter, qDifficultyFilter, qSearch, qStatusFilter, instructorProgress, questionsStats]);
+
   return (
     <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       
@@ -212,10 +260,10 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({ currentUser:
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
           <div>
             <h1 style={{ fontSize: '1.2rem', fontWeight: 600, color: '#fff' }}>
-              Instructor Analytics
+              Instructor Dashboard & Analytics
             </h1>
             <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-              Track student progress, address doubts, and manage student credentials.
+              Track what questions you have covered, monitor student completions, and resolve concept doubts.
             </p>
           </div>
 
@@ -236,13 +284,26 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({ currentUser:
           gap: '0.75rem',
           marginTop: '1.25rem'
         }}>
-          <div style={{ backgroundColor: 'var(--bg-subtle)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius)', padding: '0.75rem 1rem' }}>
+          <div 
+            onClick={() => setActiveTab('questions')}
+            style={{ backgroundColor: 'var(--bg-subtle)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius)', padding: '0.75rem 1rem', cursor: 'pointer' }}
+          >
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Instructor Covered</div>
+            <div style={{ fontSize: '1.3rem', fontWeight: 600, color: '#38bdf8', marginTop: '0.2rem' }}>
+              {instructorCoveredCount} <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 400 }}>/ {RAW_QUESTIONS.length}</span>
+            </div>
+          </div>
+
+          <div 
+            onClick={() => setActiveTab('students')}
+            style={{ backgroundColor: 'var(--bg-subtle)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius)', padding: '0.75rem 1rem', cursor: 'pointer' }}
+          >
             <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Enrolled Students</div>
             <div style={{ fontSize: '1.3rem', fontWeight: 600, color: '#fff', marginTop: '0.2rem' }}>{batchMetrics.totalStudents}</div>
           </div>
 
           <div style={{ backgroundColor: 'var(--bg-subtle)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius)', padding: '0.75rem 1rem' }}>
-            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Average Completion</div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Avg Student Progress</div>
             <div style={{ fontSize: '1.3rem', fontWeight: 600, color: 'var(--color-completed)', marginTop: '0.2rem' }}>{batchMetrics.avgCompletion}%</div>
           </div>
 
@@ -253,11 +314,6 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({ currentUser:
             <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Active Doubts</div>
             <div style={{ fontSize: '1.3rem', fontWeight: 600, color: 'var(--color-doubt)', marginTop: '0.2rem' }}>{batchMetrics.totalDoubts}</div>
           </div>
-
-          <div style={{ backgroundColor: 'var(--bg-subtle)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius)', padding: '0.75rem 1rem' }}>
-            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Questions</div>
-            <div style={{ fontSize: '1.3rem', fontWeight: 600, color: '#fff', marginTop: '0.2rem' }}>{RAW_QUESTIONS.length}</div>
-          </div>
         </div>
       </div>
 
@@ -266,8 +322,31 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({ currentUser:
         display: 'flex',
         gap: '0.35rem',
         borderBottom: '1px solid var(--border-color)',
-        paddingBottom: '0.4rem'
+        paddingBottom: '0.4rem',
+        overflowX: 'auto'
       }}>
+        <button
+          onClick={() => setActiveTab('questions')}
+          style={{
+            padding: '0.4rem 0.75rem',
+            borderRadius: 'var(--radius)',
+            fontSize: '0.82rem',
+            fontWeight: 500,
+            border: 'none',
+            cursor: 'pointer',
+            backgroundColor: activeTab === 'questions' ? 'var(--bg-hover)' : 'transparent',
+            color: activeTab === 'questions' ? '#fff' : 'var(--text-secondary)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.35rem'
+          }}
+        >
+          <span>Questions Tracker</span>
+          <span style={{ fontSize: '0.72rem', padding: '0.1rem 0.4rem', borderRadius: '10px', backgroundColor: 'var(--bg-subtle)', color: '#38bdf8' }}>
+            {instructorCoveredCount}/{RAW_QUESTIONS.length}
+          </span>
+        </button>
+
         <button
           onClick={() => setActiveTab('overview')}
           style={{
@@ -281,7 +360,7 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({ currentUser:
             color: activeTab === 'overview' ? '#fff' : 'var(--text-secondary)'
           }}
         >
-          Modules
+          Modules Overview
         </button>
 
         <button
@@ -333,7 +412,317 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({ currentUser:
         </button>
       </div>
 
-      {/* TAB 1: MODULES */}
+      {/* TAB: QUESTION TRACKER */}
+      {activeTab === 'questions' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+          {/* Controls Bar */}
+          <div style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '0.6rem',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            backgroundColor: 'var(--bg-surface)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius)',
+            padding: '0.75rem 1rem'
+          }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', flex: 1 }}>
+              <div style={{ position: 'relative', minWidth: '220px', flex: 1, maxWidth: '320px' }}>
+                <Search size={14} style={{ position: 'absolute', left: '0.65rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                <input
+                  type="text"
+                  placeholder="Search questions or topics..."
+                  value={qSearch}
+                  onChange={e => setQSearch(e.target.value)}
+                  style={{ width: '100%', paddingLeft: '2rem', fontSize: '0.8rem', height: '32px' }}
+                />
+              </div>
+
+              <select
+                value={qModuleFilter}
+                onChange={e => setQModuleFilter(e.target.value)}
+                style={{ fontSize: '0.8rem', height: '32px', backgroundColor: 'var(--bg-subtle)' }}
+              >
+                <option value="all">All Modules ({RAW_QUESTIONS.length})</option>
+                {MODULES.map(m => {
+                  const count = RAW_QUESTIONS.filter(q => q.moduleId === m.id).length;
+                  return <option key={m.id} value={m.id}>{m.title} ({count})</option>;
+                })}
+              </select>
+
+              <select
+                value={qDifficultyFilter}
+                onChange={e => setQDifficultyFilter(e.target.value)}
+                style={{ fontSize: '0.8rem', height: '32px', backgroundColor: 'var(--bg-subtle)' }}
+              >
+                <option value="all">All Difficulties</option>
+                <option value="Easy">Easy</option>
+                <option value="Medium">Medium</option>
+                <option value="Hard">Hard</option>
+              </select>
+
+              <select
+                value={qStatusFilter}
+                onChange={e => setQStatusFilter(e.target.value as any)}
+                style={{ fontSize: '0.8rem', height: '32px', backgroundColor: 'var(--bg-subtle)' }}
+              >
+                <option value="all">All Statuses</option>
+                <option value="instructor_done">✔ Instructor Covered ({instructorCoveredCount})</option>
+                <option value="instructor_pending">⏳ Instructor Pending ({RAW_QUESTIONS.length - instructorCoveredCount})</option>
+                <option value="has_students_done">👥 Solved by &ge; 1 Student</option>
+                <option value="zero_done">⭕ Unsolved by Students (0)</option>
+                <option value="has_doubts">❓ Questions with Doubts</option>
+              </select>
+            </div>
+
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+              Showing <strong>{filteredQuestions.length}</strong> of {RAW_QUESTIONS.length}
+            </div>
+          </div>
+
+          {/* Table Container */}
+          <div style={{
+            backgroundColor: 'var(--bg-surface)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius)',
+            overflow: 'hidden'
+          }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', textAlign: 'left' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-subtle)', color: 'var(--text-muted)' }}>
+                  <th style={{ padding: '0.65rem 0.9rem', width: '45px' }}>#</th>
+                  <th style={{ padding: '0.65rem 0.9rem' }}>Question & Topic</th>
+                  <th style={{ padding: '0.65rem 0.9rem', width: '85px' }}>Difficulty</th>
+                  <th style={{ padding: '0.65rem 0.9rem', width: '150px' }}>Instructor Status</th>
+                  <th style={{ padding: '0.65rem 0.9rem', width: '160px' }}>Students Done</th>
+                  <th style={{ padding: '0.65rem 0.9rem', width: '100px' }}>Doubts</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredQuestions.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} style={{ padding: '2.5rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                      No questions match the selected filters.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredQuestions.map((q, idx) => {
+                    const isCovered = instructorProgress?.[q.id]?.status === 'completed';
+                    const stat = questionsStats[q.id] || { completedCount: 0, doubtCount: 0, completedStudents: [], doubtStudents: [] };
+                    const totalStudents = Math.max(studentsStats.length, 1);
+                    const completionPct = Math.round((stat.completedCount / totalStudents) * 100);
+                    const isExpanded = expandedQuestionId === q.id;
+
+                    const difficultyColor = q.difficulty === 'Easy' 
+                      ? 'var(--color-completed)' 
+                      : q.difficulty === 'Medium' 
+                        ? '#eab308' 
+                        : '#ef4444';
+
+                    return (
+                      <React.Fragment key={q.id}>
+                        <tr style={{
+                          borderBottom: '1px solid var(--border-color)',
+                          backgroundColor: isCovered ? 'rgba(34, 197, 94, 0.02)' : 'transparent'
+                        }}>
+                          <td style={{ padding: '0.75rem 0.9rem', color: 'var(--text-muted)' }}>
+                            {idx + 1}
+                          </td>
+
+                          <td style={{ padding: '0.75rem 0.9rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                              {q.url ? (
+                                <a
+                                  href={q.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  style={{
+                                    color: '#fff',
+                                    fontWeight: 500,
+                                    textDecoration: 'none',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem'
+                                  }}
+                                  onMouseEnter={e => (e.currentTarget.style.color = '#38bdf8')}
+                                  onMouseLeave={e => (e.currentTarget.style.color = '#fff')}
+                                >
+                                  {q.title}
+                                  <ExternalLink size={11} style={{ color: 'var(--text-muted)' }} />
+                                </a>
+                              ) : (
+                                <span style={{ color: '#fff', fontWeight: 500 }}>{q.title}</span>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.2rem', alignItems: 'center' }}>
+                              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{q.moduleTitle}</span>
+                              <span style={{ color: 'var(--border-color)' }}>•</span>
+                              <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>{q.topic}</span>
+                            </div>
+                          </td>
+
+                          <td style={{ padding: '0.75rem 0.9rem' }}>
+                            <span style={{
+                              fontSize: '0.72rem',
+                              fontWeight: 500,
+                              color: difficultyColor,
+                              backgroundColor: `${difficultyColor}15`,
+                              padding: '0.15rem 0.45rem',
+                              borderRadius: '4px',
+                              display: 'inline-block'
+                            }}>
+                              {q.difficulty}
+                            </span>
+                          </td>
+
+                          <td style={{ padding: '0.75rem 0.9rem' }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (onInstructorProgressUpdate) {
+                                  onInstructorProgressUpdate(q.id, isCovered ? 'not_completed' : 'completed');
+                                }
+                              }}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.35rem',
+                                padding: '0.3rem 0.65rem',
+                                borderRadius: 'var(--radius)',
+                                fontSize: '0.75rem',
+                                fontWeight: 500,
+                                cursor: 'pointer',
+                                border: isCovered ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid var(--border-color)',
+                                backgroundColor: isCovered ? 'rgba(34, 197, 94, 0.12)' : 'var(--bg-subtle)',
+                                color: isCovered ? 'var(--color-completed)' : 'var(--text-secondary)'
+                              }}
+                              title={isCovered ? 'Click to mark as pending' : 'Click to mark as covered/completed'}
+                            >
+                              <CheckCircle2 size={13} style={{ color: isCovered ? 'var(--color-completed)' : 'var(--text-muted)' }} />
+                              <span>{isCovered ? 'Covered' : 'Mark Done'}</span>
+                            </button>
+                          </td>
+
+                          <td style={{ padding: '0.75rem 0.9rem' }}>
+                            <div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
+                                <span style={{ fontWeight: 600, color: stat.completedCount > 0 ? '#fff' : 'var(--text-muted)' }}>
+                                  {stat.completedCount} <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>/ {studentsStats.length}</span>
+                                </span>
+                                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{completionPct}%</span>
+                              </div>
+                              <div style={{ width: '100%', height: '4px', backgroundColor: 'var(--bg-subtle)', borderRadius: '2px', overflow: 'hidden' }}>
+                                <div style={{ width: `${completionPct}%`, height: '100%', backgroundColor: 'var(--color-completed)' }} />
+                              </div>
+                              {stat.completedCount > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedQuestionId(isExpanded ? null : q.id)}
+                                  style={{
+                                    background: 'transparent',
+                                    border: 'none',
+                                    color: '#38bdf8',
+                                    fontSize: '0.7rem',
+                                    padding: '0.2rem 0 0 0',
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.2rem'
+                                  }}
+                                >
+                                  {isExpanded ? 'Hide' : 'Students'}
+                                  {isExpanded ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                                </button>
+                              )}
+                            </div>
+                          </td>
+
+                          <td style={{ padding: '0.75rem 0.9rem' }}>
+                            {stat.doubtCount > 0 ? (
+                              <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.25rem',
+                                fontSize: '0.72rem',
+                                color: 'var(--color-doubt)',
+                                backgroundColor: 'rgba(234, 179, 8, 0.1)',
+                                padding: '0.2rem 0.45rem',
+                                borderRadius: '4px'
+                              }}>
+                                <HelpCircle size={12} />
+                                {stat.doubtCount} doubt{stat.doubtCount > 1 ? 's' : ''}
+                              </span>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>—</span>
+                            )}
+                          </td>
+                        </tr>
+
+                        {/* Expandable row showing student names */}
+                        {isExpanded && (
+                          <tr style={{ backgroundColor: 'var(--bg-subtle)', borderBottom: '1px solid var(--border-color)' }}>
+                            <td colSpan={6} style={{ padding: '0.75rem 1rem' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#fff' }}>
+                                  Students who completed this question ({stat.completedStudents.length}):
+                                </div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                                  {stat.completedStudents.map((name, sIdx) => (
+                                    <span
+                                      key={sIdx}
+                                      style={{
+                                        fontSize: '0.72rem',
+                                        backgroundColor: 'var(--bg-hover)',
+                                        border: '1px solid var(--border-color)',
+                                        padding: '0.15rem 0.45rem',
+                                        borderRadius: '4px',
+                                        color: 'var(--text-secondary)'
+                                      }}
+                                    >
+                                      {name}
+                                    </span>
+                                  ))}
+                                </div>
+                                {stat.doubtStudents.length > 0 && (
+                                  <div style={{ marginTop: '0.3rem' }}>
+                                    <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-doubt)' }}>
+                                      Students with doubts ({stat.doubtStudents.length}):
+                                    </div>
+                                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.2rem' }}>
+                                      {stat.doubtStudents.map((name, sIdx) => (
+                                        <span
+                                          key={sIdx}
+                                          style={{
+                                            fontSize: '0.72rem',
+                                            backgroundColor: 'rgba(234, 179, 8, 0.12)',
+                                            border: '1px solid rgba(234, 179, 8, 0.25)',
+                                            padding: '0.15rem 0.45rem',
+                                            borderRadius: '4px',
+                                            color: '#facc15'
+                                          }}
+                                        >
+                                          {name}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 1: MODULES OVERVIEW */}
       {activeTab === 'overview' && (
         <div style={{
           display: 'grid',
@@ -343,6 +732,7 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({ currentUser:
           {MODULES.map(m => {
             const qs = RAW_QUESTIONS.filter(q => q.moduleId === m.id);
             const doubts = doubtsList.filter(d => d.moduleTitle === m.title && !d.resolved);
+            const coveredInModule = qs.filter(q => instructorProgress?.[q.id]?.status === 'completed').length;
 
             return (
               <div
@@ -369,16 +759,16 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({ currentUser:
                   </p>
                 </div>
 
-                <div style={{ marginTop: '0.75rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                  <span>{qs.length} questions</span>
+                <div style={{ marginTop: '0.75rem', paddingTop: '0.5rem', borderTop: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                  <span>{qs.length} questions • <strong style={{ color: '#38bdf8' }}>{coveredInModule} covered</strong></span>
                   <button
                     onClick={() => {
-                      setDoubtModuleFilter(m.title);
-                      setActiveTab('doubts');
+                      setQModuleFilter(m.id);
+                      setActiveTab('questions');
                     }}
-                    style={{ background: 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', fontSize: '0.75rem' }}
+                    style={{ background: 'transparent', border: 'none', color: '#38bdf8', cursor: 'pointer', fontSize: '0.75rem' }}
                   >
-                    View Doubts →
+                    View Questions →
                   </button>
                 </div>
               </div>

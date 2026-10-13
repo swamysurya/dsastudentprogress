@@ -125,6 +125,8 @@ export const App: React.FC = () => {
         ) : (
           <TeacherAnalytics
             currentUser={currentUser}
+            instructorProgress={progressMap}
+            onInstructorProgressUpdate={handleProgressUpdate}
           />
         )}
       </main>
