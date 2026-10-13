@@ -3,7 +3,7 @@ import { StudentStats, DoubtItem, User, ProgressStatus } from '../types';
 import { MODULES, RAW_QUESTIONS } from '../data/dsaQuestionsData';
 import { supabaseService } from '../services/supabase';
 import { StudentDetailModal } from './StudentDetailModal';
-import { Download, Check, Search, Eye, Copy, ExternalLink, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react';
+import { Download, Check, Search, Eye, Copy, ExternalLink, CheckCircle2, ChevronDown, ChevronUp, HelpCircle } from 'lucide-react';
 
 interface TeacherAnalyticsProps {
   currentUser: User;
