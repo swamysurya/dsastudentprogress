@@ -18,27 +18,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       setError('Please enter your email address');
       return;
     }
+    if (!password.trim()) {
+      setError('Please enter your password');
+      return;
+    }
 
     setLoading(true);
     setError(null);
 
-    const { user, error: loginError } = await supabaseService.login(email, password || 'password123');
+    const { user, error: loginError } = await supabaseService.login(email.trim(), password.trim());
     setLoading(false);
 
     if (loginError || !user) {
       setError(loginError || 'Authentication failed. Please check your credentials.');
     } else {
-      onLoginSuccess(user);
-    }
-  };
-
-  const handleQuickLogin = async (userEmail: string) => {
-    setLoading(true);
-    setEmail(userEmail);
-    setPassword('demoPass123');
-    const { user } = await supabaseService.login(userEmail, 'demoPass123');
-    setLoading(false);
-    if (user) {
       onLoginSuccess(user);
     }
   };
@@ -115,6 +108,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 style={{ width: '100%' }}
+                required
               />
             </div>
 
@@ -127,35 +121,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               {loading ? 'Signing in...' : 'Sign In'}
             </button>
           </form>
-
-          {/* Quick Demo Logins for immediate testing */}
-          <div style={{ marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
-            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '0.5rem' }}>
-              Quick Demo Access
-            </span>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('instructor@dsatracker.com')}
-                className="btn btn-secondary"
-                style={{ justifyContent: 'space-between', fontSize: '0.78rem', padding: '0.4rem 0.7rem' }}
-              >
-                <span>Instructor View</span>
-                <span style={{ color: 'var(--text-muted)' }}>Analytics</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleQuickLogin('rahul.sharma@dsatracker.com')}
-                className="btn btn-secondary"
-                style={{ justifyContent: 'space-between', fontSize: '0.78rem', padding: '0.4rem 0.7rem' }}
-              >
-                <span>Student View</span>
-                <span style={{ color: 'var(--text-muted)' }}>Questions</span>
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>
   );
 };
+

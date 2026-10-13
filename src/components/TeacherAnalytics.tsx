@@ -80,42 +80,87 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({ currentUser:
     setTimeout(() => setCreatedSuccessMsg(null), 3000);
   };
 
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (content) {
+        setBulkEmailsText(content);
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const handleBulkCreate = (e: React.FormEvent) => {
     e.preventDefault();
-    const lines = bulkEmailsText.split('\n').map(l => l.trim()).filter(Boolean);
+    const lines = bulkEmailsText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     if (lines.length === 0) return;
 
     const credentials: Array<{ name: string; email: string; pass: string }> = [];
 
-    lines.forEach(line => {
-      // line could be: "email" or "email, name" or "email, name, pass"
-      const parts = line.split(',').map(p => p.trim());
-      const email = parts[0];
-      if (!email.includes('@')) return;
+    lines.forEach((line, index) => {
+      // Check if this is a header row (e.g. email,password)
+      const lower = line.toLowerCase();
+      if (index === 0 && (lower.includes('email') || lower.includes('password'))) {
+        return; // skip header row
+      }
 
-      const name = parts[1] || email.split('@')[0].replace('.', ' ').replace(/\b\w/g, l => l.toUpperCase());
-      const pass = parts[2] || defaultPassword;
+      // Format supported:
+      // 1. email,password
+      // 2. email,password,name
+      // 3. email,password,name,batch
+      const parts = line.split(',').map(p => p.trim().replace(/^["']|["']$/g, ''));
+      const email = parts[0]?.toLowerCase();
+      if (!email || !email.includes('@')) return;
+
+      const pass = parts[1] || defaultPassword;
+      const name = parts[2] || email.split('@')[0].replace('.', ' ').replace(/\b\w/g, l => l.toUpperCase());
+      const batch = parts[3] || newStudentBatch;
 
       supabaseService.addNewStudent({
         name,
         email,
-        batch: newStudentBatch
+        password: pass,
+        batch
       });
 
       credentials.push({ name, email, pass });
     });
 
+    if (credentials.length === 0) {
+      alert('No valid student email addresses found in the provided CSV text/file.');
+      return;
+    }
+
     setGeneratedCredentialsList(credentials);
-    setCreatedSuccessMsg(`Successfully provisioned ${credentials.length} student accounts!`);
-    setBulkEmailsText('');
+    setCreatedSuccessMsg(`Successfully provisioned ${credentials.length} student accounts with assigned passwords!`);
     refreshData();
   };
 
   const copyCredentialsToClipboard = () => {
-    const text = generatedCredentialsList.map(c => `Name: ${c.name} | Email: ${c.email} | Password: ${c.pass}`).join('\n');
+    const text = generatedCredentialsList.map(c => `Email: ${c.email} | Password: ${c.pass} | Name: ${c.name}`).join('\n');
     navigator.clipboard.writeText(text);
     setCopiedCredentials(true);
     setTimeout(() => setCopiedCredentials(false), 2000);
+  };
+
+  const downloadCredentialsCSV = () => {
+    const headers = ['Email', 'Password', 'Name'];
+    const rows = generatedCredentialsList.map(c => [
+      `"${c.email}"`,
+      `"${c.pass}"`,
+      `"${c.name}"`
+    ]);
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const link = document.createElement('a');
+    link.setAttribute('href', encodeURI(csvContent));
+    link.setAttribute('download', `student_credentials_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleExportCSV = () => {
@@ -612,82 +657,101 @@ export const TeacherAnalytics: React.FC<TeacherAnalyticsProps> = ({ currentUser:
               </button>
             </form>
           ) : (
-            /* Bulk Students Form */
+            /* Bulk Students CSV Form */
             <form onSubmit={handleBulkCreate} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
-                  Paste Student Emails (One per line)
-                </label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                  <label style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                    Paste CSV or Upload a .CSV File (Format: <code>email,password</code>)
+                  </label>
+                  <label style={{
+                    fontSize: '0.75rem',
+                    color: '#fff',
+                    backgroundColor: 'var(--bg-subtle)',
+                    border: '1px solid var(--border-color)',
+                    padding: '0.25rem 0.6rem',
+                    borderRadius: 'var(--radius)',
+                    cursor: 'pointer'
+                  }}>
+                    📁 Choose .CSV File
+                    <input
+                      type="file"
+                      accept=".csv,text/csv"
+                      onChange={handleFileUpload}
+                      style={{ display: 'none' }}
+                    />
+                  </label>
+                </div>
+
                 <textarea
                   rows={6}
-                  placeholder={"student1@example.com\nstudent2@example.com\nstudent3@example.com"}
+                  placeholder={`email,password\nstudent1@example.com,pass123\nstudent2@example.com,secret456\nstudent3@example.com,student@2026`}
                   value={bulkEmailsText}
                   onChange={e => setBulkEmailsText(e.target.value)}
                   style={{ width: '100%', fontSize: '0.82rem', fontFamily: 'monospace' }}
                   required
                 />
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem', display: 'block' }}>
-                  Tip: You can also paste format: <code>email, name, password</code> on each line.
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
+                  Supported formats per line: <code>email,password</code> or <code>email,password,name</code>. Header row (<code>email,password</code>) is automatically detected and skipped.
                 </span>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
-                    Default Password
-                  </label>
-                  <input
-                    type="text"
-                    value={defaultPassword}
-                    onChange={e => setDefaultPassword(e.target.value)}
-                    style={{ width: '100%' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
-                    Batch
-                  </label>
-                  <select
-                    value={newStudentBatch}
-                    onChange={e => setNewStudentBatch(e.target.value)}
-                    style={{ width: '100%' }}
-                  >
-                    <option value="Batch 2026-A">Batch 2026-A</option>
-                    <option value="Batch 2026-B">Batch 2026-B</option>
-                    <option value="FastTrack Batch">FastTrack Batch</option>
-                  </select>
-                </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
+                  Assign to Batch
+                </label>
+                <select
+                  value={newStudentBatch}
+                  onChange={e => setNewStudentBatch(e.target.value)}
+                  style={{ width: '100%' }}
+                >
+                  <option value="Batch 2026-A">Batch 2026-A</option>
+                  <option value="Batch 2026-B">Batch 2026-B</option>
+                  <option value="FastTrack Batch">FastTrack Batch</option>
+                </select>
               </div>
 
-              <button type="submit" className="btn btn-primary" style={{ marginTop: '0.5rem' }}>
-                Provision All Accounts
+              <button type="submit" className="btn btn-primary" style={{ marginTop: '0.25rem' }}>
+                Provision All Accounts From CSV
               </button>
             </form>
           )}
 
-          {/* List of provisioned credentials with Copy button */}
+          {/* List of provisioned credentials with Copy & Download buttons */}
           {generatedCredentialsList.length > 0 && (
             <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid var(--border-color)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                 <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                  Generated Credentials ({generatedCredentialsList.length})
+                  Provisioned Student Accounts ({generatedCredentialsList.length})
                 </span>
-                <button
-                  type="button"
-                  onClick={copyCredentialsToClipboard}
-                  className="btn btn-secondary"
-                  style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
-                >
-                  {copiedCredentials ? <Check size={12} color="var(--color-completed)" /> : <Copy size={12} />}
-                  {copiedCredentials ? 'Copied!' : 'Copy All'}
-                </button>
+                <div style={{ display: 'flex', gap: '0.4rem' }}>
+                  <button
+                    type="button"
+                    onClick={downloadCredentialsCSV}
+                    className="btn btn-secondary"
+                    style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
+                  >
+                    <Download size={12} /> Download CSV
+                  </button>
+                  <button
+                    type="button"
+                    onClick={copyCredentialsToClipboard}
+                    className="btn btn-secondary"
+                    style={{ padding: '0.25rem 0.6rem', fontSize: '0.75rem' }}
+                  >
+                    {copiedCredentials ? <Check size={12} color="var(--color-completed)" /> : <Copy size={12} />}
+                    {copiedCredentials ? 'Copied!' : 'Copy All'}
+                  </button>
+                </div>
               </div>
 
-              <div style={{ maxHeight: '180px', overflowY: 'auto', backgroundColor: 'var(--bg-subtle)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius)', padding: '0.5rem' }}>
+              <div style={{ maxHeight: '200px', overflowY: 'auto', backgroundColor: 'var(--bg-subtle)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius)', padding: '0.5rem' }}>
                 {generatedCredentialsList.map((c, i) => (
-                  <div key={i} style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', padding: '0.25rem 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                    <strong style={{ color: '#fff' }}>{c.email}</strong> • Password: <code>{c.pass}</code> ({c.name})
+                  <div key={i} style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', padding: '0.3rem 0', borderBottom: '1px solid rgba(255,255,255,0.04)', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>
+                      <strong style={{ color: '#fff' }}>{c.email}</strong> • Password: <code>{c.pass}</code>
+                    </span>
+                    <span style={{ color: 'var(--text-muted)' }}>{c.name}</span>
                   </div>
                 ))}
               </div>

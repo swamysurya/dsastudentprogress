@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Sensitive Credentials and Seed Files
+students_credentials.csv
+*.csv
+scripts/seed_supabase_auth_users.sql
+.env
+.env.*
+!.env.example

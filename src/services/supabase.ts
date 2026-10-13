@@ -9,40 +9,18 @@ const STORAGE_KEY_AUTH_USER = 'dsa_tracker_auth_user';
 const STORAGE_KEY_STUDENTS_PROGRESS = 'dsa_tracker_mock_progress';
 const STORAGE_KEY_RESOLVED_DOUBTS = 'dsa_tracker_resolved_doubts';
 
+import { PRELOADED_STUDENTS } from '../data/preloadedStudents';
+
 // Default mock users
+const initialPreloadedUsers: User[] = PRELOADED_STUDENTS.map((s, idx) => ({
+  id: `student-preloaded-${idx + 1}`,
+  email: s.email,
+  name: s.name,
+  role: 'student' as const,
+  batch: 'Batch 2026'
+}));
+
 export const DEFAULT_USERS: User[] = [
-  {
-    id: 'user-student-1',
-    email: 'rahul.sharma@dsatracker.com',
-    name: 'Rahul Sharma',
-    role: 'student',
-    batch: 'Batch 2026-A',
-    avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80'
-  },
-  {
-    id: 'user-student-2',
-    email: 'priya.patel@dsatracker.com',
-    name: 'Priya Patel',
-    role: 'student',
-    batch: 'Batch 2026-A',
-    avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=120&q=80'
-  },
-  {
-    id: 'user-student-3',
-    email: 'amit.kumar@dsatracker.com',
-    name: 'Amit Kumar',
-    role: 'student',
-    batch: 'Batch 2026-B',
-    avatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=120&q=80'
-  },
-  {
-    id: 'user-student-4',
-    email: 'sneha.reddy@dsatracker.com',
-    name: 'Sneha Reddy',
-    role: 'student',
-    batch: 'Batch 2026-A',
-    avatar: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=120&q=80'
-  },
   {
     id: 'user-teacher-1',
     email: 'instructor@dsatracker.com',
@@ -50,94 +28,29 @@ export const DEFAULT_USERS: User[] = [
     role: 'teacher',
     batch: 'Faculty Lead',
     avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&w=120&q=80'
-  }
+  },
+  ...initialPreloadedUsers
 ];
 
-// Initialize default mock progress for the students to have realistic analytics out of the box
+// Seed initial instructor credentials in local storage if not present
+if (typeof window !== 'undefined' && !localStorage.getItem('dsa_tracker_passwords')) {
+  const initialPasswords: Record<string, string> = {
+    'instructor@dsatracker.com': 'swamy@2026'
+  };
+  localStorage.setItem('dsa_tracker_passwords', JSON.stringify(initialPasswords));
+}
+
+// Initialize default mock progress
 function getInitialMockProgress(): Record<string, Record<string, { status: ProgressStatus; notes?: string; updatedAt: string }>> {
   const stored = localStorage.getItem(STORAGE_KEY_STUDENTS_PROGRESS);
   if (stored) {
     try {
       return JSON.parse(stored);
     } catch {
-      // fallback
+      return {};
     }
   }
-
-  // Pre-seed some realistic progress for demo students
-  const initial: Record<string, Record<string, { status: ProgressStatus; notes?: string; updatedAt: string }>> = {
-    'user-student-1': {},
-    'user-student-2': {},
-    'user-student-3': {},
-    'user-student-4': {}
-  };
-
-  // Seed Rahul Sharma (active student, completed some stack/queue & binary tree)
-  RAW_QUESTIONS.forEach((q, idx) => {
-    const now = new Date(Date.now() - (idx % 10) * 86400000).toISOString();
-    if (q.isDoneDefault) {
-      initial['user-student-1'][q.id] = { status: 'completed', updatedAt: now };
-    } else if (idx === 0 || idx === 13 || idx === 21) {
-      initial['user-student-1'][q.id] = {
-        status: 'doubt',
-        notes: idx === 21 ? 'Need help optimizing time complexity from O(N^2) to O(N)' : 'Confused with edge condition',
-        updatedAt: now
-      };
-    } else {
-      initial['user-student-1'][q.id] = { status: 'not_completed', updatedAt: now };
-    }
-  });
-
-  // Seed Priya Patel (high achiever)
-  RAW_QUESTIONS.forEach((q, idx) => {
-    const now = new Date(Date.now() - (idx % 5) * 86400000).toISOString();
-    if (idx < 50 || q.isDoneDefault) {
-      initial['user-student-2'][q.id] = { status: 'completed', updatedAt: now };
-    } else if (idx === 52 || idx === 65) {
-      initial['user-student-2'][q.id] = {
-        status: 'doubt',
-        notes: 'Inorder/Postorder tree reconstruction edge case when array has duplicates',
-        updatedAt: now
-      };
-    } else {
-      initial['user-student-2'][q.id] = { status: 'not_completed', updatedAt: now };
-    }
-  });
-
-  // Seed Amit Kumar (needs help with heaps & two pointers)
-  RAW_QUESTIONS.forEach((q, idx) => {
-    const now = new Date(Date.now() - (idx % 8) * 86400000).toISOString();
-    if (idx < 25) {
-      initial['user-student-3'][q.id] = { status: 'completed', updatedAt: now };
-    } else if (idx === 75 || idx === 76 || idx === 90) {
-      initial['user-student-3'][q.id] = {
-        status: 'doubt',
-        notes: 'Doubt in Heapify bottom-up vs top-down complexity calculation',
-        updatedAt: now
-      };
-    } else {
-      initial['user-student-3'][q.id] = { status: 'not_completed', updatedAt: now };
-    }
-  });
-
-  // Seed Sneha Reddy
-  RAW_QUESTIONS.forEach((q, idx) => {
-    const now = new Date().toISOString();
-    if (idx < 35) {
-      initial['user-student-4'][q.id] = { status: 'completed', updatedAt: now };
-    } else if (idx === 36) {
-      initial['user-student-4'][q.id] = {
-        status: 'doubt',
-        notes: 'How to calculate maximum power score in sliding window?',
-        updatedAt: now
-      };
-    } else {
-      initial['user-student-4'][q.id] = { status: 'not_completed', updatedAt: now };
-    }
-  });
-
-  localStorage.setItem(STORAGE_KEY_STUDENTS_PROGRESS, JSON.stringify(initial));
-  return initial;
+  return {};
 }
 
 class SupabaseService {
@@ -209,19 +122,57 @@ class SupabaseService {
     }
   }
 
+  // Helper to get expected password for local/offline auth
+  public getExpectedPassword(email: string): string | null {
+    const norm = email.toLowerCase().trim();
+
+    // 1. Instructor password
+    if (norm === 'instructor@dsatracker.com') {
+      return 'swamy@2026';
+    }
+
+    // 2. Check localStorage dsa_tracker_passwords
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('dsa_tracker_passwords');
+        if (stored) {
+          const map = JSON.parse(stored);
+          if (map && map[norm]) {
+            return map[norm];
+          }
+        }
+      } catch {}
+    }
+
+    return null;
+  }
+
   // Login handler
   public async login(email: string, password: string): Promise<{ user: User | null; error: string | null }> {
     const trimmedEmail = email.trim().toLowerCase();
+    const trimmedPassword = (password || '').trim();
 
-    // 1. If Supabase is connected, try Supabase Auth first
+    if (!trimmedEmail) {
+      return { user: null, error: 'Please enter your email address.' };
+    }
+    if (!trimmedPassword) {
+      return { user: null, error: 'Please enter your password.' };
+    }
+
+    // 1. If Supabase is connected, authenticate strictly against Supabase Auth
     if (this.isConfigured && this.client) {
       try {
         const { data, error } = await this.client.auth.signInWithPassword({
           email: trimmedEmail,
-          password: password
+          password: trimmedPassword
         });
 
-        if (!error && data.user) {
+        if (error) {
+          // Strictly reject if credentials are invalid on Supabase
+          return { user: null, error: error.message || 'Invalid email or password.' };
+        }
+
+        if (data?.user) {
           // Fetch user profile from Supabase profiles table
           const { data: profile } = await this.client
             .from('profiles')
@@ -243,48 +194,32 @@ class SupabaseService {
           return { user: userObj, error: null };
         }
       } catch (e: any) {
-        console.warn('Supabase auth failed, falling back to credentials list:', e);
+        console.error('Supabase authentication error:', e);
+        return { user: null, error: e.message || 'Authentication service error.' };
       }
     }
 
-    // 2. Mock / Default Users Authentication
-    // Check registered or default users
+    // 2. Strict Offline / Local / Demo Authentication
+    // Only registered accounts (instructor, preloaded 80 students, and teacher-uploaded CSV students) with their EXACT passwords can log in!
     const allUsers = this.getAllRegisteredUsers();
     const matched = allUsers.find(u => u.email.toLowerCase() === trimmedEmail);
 
-    if (matched) {
-      // In default mode any non-empty password matches or "password123"
-      this.setCurrentUser(matched);
-      return { user: matched, error: null };
+    if (!matched) {
+      return { user: null, error: 'No account registered with this email. Please check your email or contact the instructor.' };
     }
 
-    // Fallback: If user enters an email that ends with @teacher.com or includes 'admin' / 'instructor'
-    if (trimmedEmail.includes('teacher') || trimmedEmail.includes('instructor') || trimmedEmail.includes('admin')) {
-      const teacherUser: User = {
-        id: 'user-' + Date.now(),
-        email: trimmedEmail,
-        name: trimmedEmail.split('@')[0].toUpperCase(),
-        role: 'teacher',
-        batch: 'Faculty Lead'
-      };
-      this.setCurrentUser(teacherUser);
-      return { user: teacherUser, error: null };
+    const expectedPassword = this.getExpectedPassword(trimmedEmail);
+    if (!expectedPassword) {
+      return { user: null, error: 'No password found for this account. Please contact the instructor.' };
     }
 
-    // Fallback: allow student login with any email
-    if (trimmedEmail.includes('@')) {
-      const studentUser: User = {
-        id: 'user-' + Math.random().toString(36).substring(2, 9),
-        email: trimmedEmail,
-        name: trimmedEmail.split('@')[0].replace('.', ' ').replace(/\b\w/g, l => l.toUpperCase()),
-        role: 'student',
-        batch: 'DSA Batch 2026'
-      };
-      this.setCurrentUser(studentUser);
-      return { user: studentUser, error: null };
+    if (expectedPassword !== trimmedPassword) {
+      return { user: null, error: 'Incorrect password. Please verify your credentials.' };
     }
 
-    return { user: null, error: 'Invalid credentials. Please enter a valid email address.' };
+    // Valid credentials verified!
+    this.setCurrentUser(matched);
+    return { user: matched, error: null };
   }
 
   public logout() {
@@ -309,14 +244,25 @@ class SupabaseService {
   }
 
   // Add new student credential (used by Teacher)
-  public addNewStudent(student: { name: string; email: string; batch?: string }): User {
+  public addNewStudent(student: { name?: string; email: string; password?: string; batch?: string }): User {
+    const trimmedEmail = student.email.trim().toLowerCase();
     const newUser: User = {
-      id: 'student-' + Date.now(),
-      name: student.name,
-      email: student.email.trim().toLowerCase(),
+      id: 'student-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      name: student.name || trimmedEmail.split('@')[0].replace('.', ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      email: trimmedEmail,
       role: 'student',
       batch: student.batch || 'Batch 2026'
     };
+
+    // Store custom password if provided
+    if (student.password) {
+      const storedPasswords = localStorage.getItem('dsa_tracker_passwords') || '{}';
+      try {
+        const pwMap = JSON.parse(storedPasswords);
+        pwMap[trimmedEmail] = student.password;
+        localStorage.setItem('dsa_tracker_passwords', JSON.stringify(pwMap));
+      } catch {}
+    }
 
     const extra = localStorage.getItem('dsa_tracker_extra_users');
     let extraUsers: User[] = [];
@@ -347,7 +293,7 @@ class SupabaseService {
 
   // Student Progress: Get progress map for a student
   public async getStudentProgress(studentId: string): Promise<Record<string, { status: ProgressStatus; notes?: string; updatedAt: string }>> {
-    // 1. If Supabase configured, attempt to query
+    // 1. If Supabase configured, query directly from DB for this specific student
     if (this.isConfigured && this.client) {
       try {
         const { data, error } = await this.client
@@ -355,7 +301,7 @@ class SupabaseService {
           .select('question_id, status, notes, updated_at')
           .eq('student_id', studentId);
 
-        if (!error && data && data.length > 0) {
+        if (!error && data) {
           const map: Record<string, { status: ProgressStatus; notes?: string; updatedAt: string }> = {};
           data.forEach(item => {
             map[item.question_id] = {
@@ -371,15 +317,9 @@ class SupabaseService {
       }
     }
 
-    // 2. Fallback to mock / local progress
+    // 2. Fallback to mock / local progress strictly isolated per studentId
     if (!this.mockProgress[studentId]) {
       this.mockProgress[studentId] = {};
-      RAW_QUESTIONS.forEach(q => {
-        this.mockProgress[studentId][q.id] = {
-          status: q.isDoneDefault ? 'completed' : 'not_completed',
-          updatedAt: new Date().toISOString()
-        };
-      });
       this.persistMockProgress();
     }
 
@@ -432,9 +372,79 @@ class SupabaseService {
 
   // Analytics for Teacher: Get stats for all students
   public async getAllStudentsStats(): Promise<StudentStats[]> {
-    const allUsers = this.getAllRegisteredUsers().filter(u => u.role === 'student');
     const totalQ = RAW_QUESTIONS.length;
 
+    // 1. If Supabase configured, query Supabase profiles & student_progress directly
+    if (this.isConfigured && this.client) {
+      try {
+        const { data: profiles, error: pError } = await this.client
+          .from('profiles')
+          .select('id, email, full_name, role, batch')
+          .eq('role', 'student');
+
+        const { data: allProgress, error: progError } = await this.client
+          .from('student_progress')
+          .select('student_id, question_id, status, notes, updated_at');
+
+        if (!pError && profiles && profiles.length > 0) {
+          const progressByStudent: Record<string, Record<string, { status: ProgressStatus; notes?: string; updatedAt: string }>> = {};
+          if (!progError && allProgress) {
+            allProgress.forEach(row => {
+              if (!progressByStudent[row.student_id]) {
+                progressByStudent[row.student_id] = {};
+              }
+              progressByStudent[row.student_id][row.question_id] = {
+                status: row.status as ProgressStatus,
+                notes: row.notes,
+                updatedAt: row.updated_at
+              };
+            });
+          }
+
+          const stats: StudentStats[] = profiles.map(student => {
+            const prog = progressByStudent[student.id] || {};
+            let completed = 0;
+            let doubt = 0;
+            let notCompleted = 0;
+            let latestTime = '';
+
+            Object.values(prog).forEach(item => {
+              if (item.status === 'completed') completed++;
+              else if (item.status === 'doubt') doubt++;
+              else notCompleted++;
+
+              if (!latestTime || (item.updatedAt && item.updatedAt > latestTime)) {
+                latestTime = item.updatedAt;
+              }
+            });
+
+            const countedTotal = completed + doubt + notCompleted;
+            const effectiveTotal = Math.max(countedTotal, totalQ);
+            const remaining = effectiveTotal - completed - doubt;
+
+            return {
+              studentId: student.id,
+              studentName: student.full_name || student.email.split('@')[0],
+              studentEmail: student.email,
+              batch: student.batch || 'Batch 2026',
+              completed,
+              doubt,
+              notCompleted: remaining > 0 ? remaining : notCompleted,
+              total: totalQ,
+              percentage: Math.round((completed / totalQ) * 100),
+              lastActive: latestTime || new Date().toISOString()
+            };
+          });
+
+          return stats.sort((a, b) => b.percentage - a.percentage);
+        }
+      } catch (err) {
+        console.warn('Error fetching student stats from Supabase:', err);
+      }
+    }
+
+    // 2. Fallback to registered local users
+    const allUsers = this.getAllRegisteredUsers().filter(u => u.role === 'student');
     const stats: StudentStats[] = [];
 
     for (const student of allUsers) {
@@ -454,7 +464,6 @@ class SupabaseService {
         }
       });
 
-      // Total could also account for unvisited questions
       const countedTotal = completed + doubt + notCompleted;
       const effectiveTotal = Math.max(countedTotal, totalQ);
       const remaining = effectiveTotal - completed - doubt;
@@ -473,16 +482,62 @@ class SupabaseService {
       });
     }
 
-    // Sort descending by percentage
     return stats.sort((a, b) => b.percentage - a.percentage);
   }
 
   // Get all questions where students flagged "Have Doubt in this Concept"
   public async getAllDoubts(): Promise<DoubtItem[]> {
+    // 1. If Supabase configured, query directly
+    if (this.isConfigured && this.client) {
+      try {
+        const { data: doubtRows } = await this.client
+          .from('student_progress')
+          .select('student_id, question_id, status, notes, updated_at')
+          .eq('status', 'doubt');
+
+        if (doubtRows && doubtRows.length > 0) {
+          const { data: profiles } = await this.client
+            .from('profiles')
+            .select('id, email, full_name');
+          const profileMap = new Map((profiles || []).map(p => [p.id, p]));
+          const qMap = new Map(RAW_QUESTIONS.map(q => [q.id, q]));
+          const resolvedIds = this.getResolvedDoubtIds();
+
+          const doubts: DoubtItem[] = [];
+          doubtRows.forEach(row => {
+            const q = qMap.get(row.question_id);
+            const prof = profileMap.get(row.student_id);
+            if (q) {
+              const doubtId = `${row.student_id}_${row.question_id}`;
+              doubts.push({
+                id: doubtId,
+                studentId: row.student_id,
+                studentName: prof?.full_name || prof?.email?.split('@')[0] || 'Student',
+                studentEmail: prof?.email || '',
+                questionId: q.id,
+                questionTitle: q.title,
+                moduleTitle: q.moduleTitle,
+                topic: q.topic,
+                difficulty: q.difficulty,
+                notes: row.notes,
+                updatedAt: row.updated_at,
+                resolved: resolvedIds.includes(doubtId)
+              });
+            }
+          });
+          return doubts.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+        } else if (doubtRows) {
+          return [];
+        }
+      } catch (err) {
+        console.warn('Error fetching doubts from Supabase:', err);
+      }
+    }
+
+    // 2. Local fallback
     const doubts: DoubtItem[] = [];
     const allUsers = this.getAllRegisteredUsers().filter(u => u.role === 'student');
     const resolvedIds = this.getResolvedDoubtIds();
-
     const qMap = new Map(RAW_QUESTIONS.map(q => [q.id, q]));
 
     for (const student of allUsers) {
